@@ -41,43 +41,103 @@ class Player:
         return self.__repr__()
 
 
+class Ticket:
+    def __init__(self, players):
+        self.players = players
+        self.mu = 0
+        self.toxicity = 0
+        for player in players:
+            self.mu += player.rating.mu
+            self.toxicity += player.toxicity
+        self.mu = self.mu / len(players)
+        self.toxicity = self.toxicity / len(players)
+
+
 class Lobby:
     def __init__(self, creation_tick):
         self.team1 = []
         self.team2 = []
-        self.players = []
+        self.tickets = []
+        self.players_count = 0
         self.creation_tick = creation_tick
+        self.t1_party_counter = 0
+        self.t2_party_counter = 0
 
-    def add_player(self, player):
-        self.players.append(player)
+    def add_ticket(self, ticket):
+        if len(ticket.players) > 1:
+            if len(ticket.players) + self.t1_party_counter <= 5:
+                self.tickets.append(ticket)
+                self.players_count += len(ticket.players)
+                self.t1_party_counter += len(ticket.players)
+            elif len(ticket.players) + self.t2_party_counter <= 5:
+                self.tickets.append(ticket)
+                self.players_count += len(ticket.players)
+                self.t2_party_counter += len(ticket.players)
+        elif len(ticket.players) == 1:
+            self.tickets.append(ticket)
+            self.players_count += len(ticket.players)
 
     def fill_teams(self):
-        self.players.sort(reverse=True, key=lambda x: x.rating.mu)
-        for i, player in enumerate(self.players):
-            if i % 2 == 0:
-                self.team1.append(player)
-            else:
-                self.team2.append(player)
+        test = []
+        for ticket in self.tickets:
+            test.append("ticket mu: " + str(ticket.mu) + ", player mu: " + str(ticket.players[0].rating.mu))
+
+        self.tickets.sort(reverse=True, key=lambda x: len(x.players))
+        team1_count = 0
+        team2_count = 0
+        i = 0
+        for ticket in self.tickets:
+            if len(ticket.players) > 1:
+                if (team1_count + len(ticket.players) <= 5) and (team1_count <= team2_count):
+                    self.team1.append(ticket)
+                    team1_count += len(ticket.players)
+                    i += 1
+                else:
+                    self.team2.append(ticket)
+                    team2_count += len(ticket.players)
+                    i += 1
+
+        self.tickets.sort(reverse=True, key=lambda x: x.mu)
+        for ticket in self.tickets:
+            if len(ticket.players) == 1:
+                if team1_count <= team2_count:
+                    self.team1.append(ticket)
+                    team1_count += len(ticket.players)
+                else:
+                    self.team2.append(ticket)
+                    team2_count += len(ticket.players)
+
+    def tickets_to_players(self, tickets):
+        players = []
+        for ticket in tickets:
+            for player in ticket.players:
+                players.append(player)
+        return players
 
     def balance_teams(self, rs: RatingSystem):
-        best_win = abs(rs.win_probability(self.team1, self.team2) - 0.5)
+        best_win = abs(rs.win_probability(self.tickets_to_players(self.team1), self.tickets_to_players(self.team2)) - 0.5)
         i = 0
         while best_win >= 0.01 and i < 20:
             i += 1
             new_wins = []
             new_teams = []
-            for j in range(len(self.team1)):
-                for l in range(len(self.team2)):
+            for ticket1 in self.team1:
+                if len(ticket1.players) > 1:
+                    continue
+                for ticket2 in self.team2:
+                    if len(ticket2.players) > 1:
+                        continue
                     copy1 = self.team1.copy()
                     copy2 = self.team2.copy()
-                    buff = copy1[j]
-                    copy1[j] = copy2[l]
-                    copy2[l] = buff
-                    new_wins.append(abs(rs.win_probability(copy1, copy2) - 0.5))
+                    copy1.remove(ticket1)
+                    copy2.remove(ticket2)
+                    copy1.append(ticket2)
+                    copy2.append(ticket1)
+                    new_wins.append(abs(rs.win_probability(self.tickets_to_players(copy1), self.tickets_to_players(copy2)) - 0.5))
                     new_teams.append([copy1, copy2])
 
             min_win = 1
-            min_j = math.factorial(len(self.team1)) + 1
+            min_j = 0
             for j, win in enumerate(new_wins):
                 if win < min_win:
                     min_win = win
@@ -95,9 +155,8 @@ class Game:
         self.end_tick = start_tick + game_duration
         self.start_tick = start_tick
         self.waiting_time = (start_tick - lobby.creation_tick)/2
+        self.team1 = lobby.tickets_to_players(lobby.team1)
+        self.team2 = lobby.tickets_to_players(lobby.team2)
 
     def end_game(self):
         return self.lobby.team1 + self.lobby.team2
-
-    def generate_game_info(self, tick):
-        return pd.DataFrame(data={"waiting_tine": self.waiting_time,}, index=[0])
